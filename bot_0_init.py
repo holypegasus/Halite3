@@ -13,31 +13,9 @@ game = hlt.Game()
 # TODO preproc
 game.ready("MyPythonBot")
 
-# sid -> dest # TODO (task, dest)
-sid2dest = dict()
-def fsm_status():
-  # # status FSM
-  # if ship.id not in ship_status:
-  #   ship_status[ship.id] = "exploring"
-  # elif ship_status[ship.id] == "returning":
-  #   if ship.position == me.shipyard.position:
-  #     ship_status[ship.id] = "exploring"
-  #   else:
-  #     return ship.move(game_map.naive_navigate(ship, me.shipyard.position))
-  # elif ship.halite_amount >= constants.MAX_HALITE / 4:
-  #   ship_status[ship.id] = "returning"
-  pass
-
-# little -> nearest most
-
-# many -> unload
 
 def get_moves():
   move_random = lambda : random.choice(Direction.get_all_cardinals())
-  def fltr_move(moves):
-    # TODO avoid collision
-    moves = [m for m in moves]
-    return moves
   def get_move(ship):
     logging.info("Ship {} has {} halite.".format(ship.id, ship.halite_amount))
     # move
@@ -49,9 +27,7 @@ def get_moves():
     else:
       return ship.stay_still()
 
-  moves = map(get_move, me.get_ships())
-  moves = fltr_move(moves)
-  return moves
+  return list(map(get_move, me.get_ships()))
 
 def get_spawn():
   if all([
@@ -61,12 +37,6 @@ def get_spawn():
     ]):
     return [me.shipyard.spawn()]
   else: return []
-
-def get_dropoff():
-  # me.get_dropoffs() -> [locs]
-  # ship.make_dropoff() -> move
-  # game_map.calculate_distance(loc0, loc1) -> int
-  pass
 
 
 """ <<<Game Loop>>> """
