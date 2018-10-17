@@ -145,6 +145,7 @@ class GameMap:
     self.height = height
     self._cells = cells
 
+  # -> Pos | Ent
   def __getitem__(self, location):
     """
     Getter for position object or entity objects within the game map

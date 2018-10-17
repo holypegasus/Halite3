@@ -63,6 +63,7 @@ class Ship(Entity):
     """Return a move to transform this ship into a dropoff."""
     return "{} {}".format(commands.CONSTRUCT, self.id)
 
+  # Dir_Raw -> Dir
   def move(self, direction):
     """
     Return a move to move this ship in a direction without

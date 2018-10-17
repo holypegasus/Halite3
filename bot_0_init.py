@@ -11,7 +11,7 @@ from hlt.positionals import Direction
 """ <<<Game Begin>>> """
 game = hlt.Game()
 # TODO preproc
-game.ready("MyPythonBot")
+game.ready("0_Tutorial")
 
 
 def get_moves():

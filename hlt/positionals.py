@@ -1,6 +1,7 @@
 from . import commands
 
 
+# aka delta-Position
 class Direction:
   """
   Holds positional tuples in relation to cardinal directions
@@ -66,6 +67,7 @@ class Position:
     self.x = x
     self.y = y
 
+  # Dir -> Pos
   def directional_offset(self, direction):
     """
     Returns the position considering a Direction cardinal tuple
@@ -74,6 +76,7 @@ class Position:
     """
     return self + Position(*direction)
 
+  # -> [Pos]
   def get_surrounding_cardinals(self):
     """
     :return: Returns a list of all positions around this specific position in each cardinal direction

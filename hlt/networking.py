@@ -25,7 +25,7 @@ class Game:
     num_players, self.my_id = map(int, read_input().split())
 
     logging.basicConfig(
-      filename="bot-{}.log".format(self.my_id),
+      filename="replays/bot-{}.log".format(self.my_id),
       filemode="w",
       level=logging.DEBUG,
       format='<%(module)s.%(funcName)s:%(lineno)d> %(message)s',
@@ -51,7 +51,19 @@ class Game:
     :returns: nothing.
     """
     self.turn_number = int(read_input())
-    logging.info("=============== TURN {:03} ================".format(self.turn_number))
+    worth_store = self.me.halite_amount
+    ships_mine = self.me.get_ships()
+    worth_ships = len(ships_mine)*constants.SHIP_COST
+    worth_cargo = sum(s.halite_amount for s in ships_mine)
+    worth_total = worth_store + worth_ships + worth_cargo
+
+    logging.info("====== TURN {turn:03} : {store} + {ship} + {cargo} => {total} ======".format(
+      turn=self.turn_number,
+      store=worth_store,
+      ship=worth_ships,
+      cargo=worth_cargo,
+      total=worth_total,
+      ))
 
     for _ in range(len(self.players)):
       player, num_ships, num_dropoffs, halite = map(int, read_input().split())
