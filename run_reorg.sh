@@ -1,8 +1,18 @@
 #!/bin/sh
 
-cd replays;
-mv errorlog*0.log bot_0_err.log;
-mv errorlog*1.log bot_1_err.log;
+# mv p0 p1 if p0
+function mv_if { 
+  if [ -f $1 ]; then
+    mv $1 $2;
+    echo "renamed!"
+  else
+    > $2;
+    echo "perfect :D"
+  fi
+}
 
-# echo 'Reorged replay logs.'
+cd replays;
+mv_if errorlog*0.log bot_0_err.log
+mv_if errorlog*1.log bot_1_err.log;
+
 

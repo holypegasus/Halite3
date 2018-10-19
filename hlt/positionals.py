@@ -112,3 +112,4 @@ class Position:
     return "{}({}, {})".format(self.__class__.__name__,
                    self.x,
                    self.y)
+

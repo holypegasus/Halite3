@@ -6,6 +6,7 @@ from .common import read_input
 from . import constants
 from .game_map import GameMap, Player
 
+LOG_LVL = logging.DEBUG
 
 class Game:
   """
@@ -27,11 +28,11 @@ class Game:
     logging.basicConfig(
       filename="replays/bot-{}.log".format(self.my_id),
       filemode="w",
-      level=logging.DEBUG,
+      level=LOG_LVL,
       format='<%(module)s.%(funcName)s:%(lineno)d> %(message)s',
-    )
+      )
 
-    self.players = {}
+    self.players = {}  # sid -> Player
     for player in range(num_players):
       self.players[player] = Player._generate()
     self.me = self.players[self.my_id]
