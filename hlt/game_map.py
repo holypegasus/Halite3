@@ -1,5 +1,7 @@
 import queue
 
+import pandas as pd
+
 from . import constants
 from .entity import Entity, Shipyard, Ship, Dropoff
 from .positionals import Direction, Position
@@ -143,7 +145,7 @@ class GameMap:
   def __init__(self, cells, width, height):
     self.width = width
     self.height = height
-    self._cells = cells
+    self._cells = cells # matrix: [height, width]
 
   # -> Pos | Ent
   def __getitem__(self, location):
@@ -158,6 +160,16 @@ class GameMap:
     elif isinstance(location, Entity):
       return self._cells[location.position.y][location.position.x]
     return None
+
+  def __repr__(self):
+    mapcell2hlt = lambda mc: mc.halite_amount
+    cell2hlt = [map(mapcell2hlt, mcs) for mcs in self._cells]
+    df_cell2hlt = pd.DataFrame(cell2hlt)
+    return '{name}({width} x {height})\n{halites}'.format(
+      name=self.__class__.__name__,
+      width=self.width,
+      height=self.height,
+      halites=df_cell2hlt)
 
   def calculate_distance(self, source, target):
     """
@@ -185,7 +197,7 @@ class GameMap:
     return Position(position.x % self.width, position.y % self.height)
 
   @staticmethod
-  def _get_target_direction(source, target):
+  def _get_target_direction(source, target): # Pos, Pos -> (Dir, Dir)
     """
     Returns where in the cardinality spectrum the target is from source. e.g.: North, East; South, West; etc.
     NOTE: Ignores toroid
@@ -196,7 +208,7 @@ class GameMap:
     return (Direction.South if target.y > source.y else Direction.North if target.y < source.y else None,
         Direction.East if target.x > source.x else Direction.West if target.x < source.x else None)
 
-  def get_unsafe_moves(self, source, destination):
+  def get_unsafe_moves(self, source, destination): # Pos, Pos -> [Dir]
     """
     Return the Direction(s) to move closer to the target point, or empty if the points are the same.
     This move mechanic does not account for collisions. The multiple directions are if both directional movements
@@ -248,8 +260,10 @@ class GameMap:
     for y_position in range(map_height):
       cells = read_input().split()
       for x_position in range(map_width):
-        game_map[y_position][x_position] = MapCell(Position(x_position, y_position),
-                               int(cells[x_position]))
+        game_map[y_position][x_position] = MapCell(
+          position=Position(x_position, y_position),
+          halite_amount=int(cells[x_position])
+          )
     return GameMap(game_map, map_width, map_height)
 
   def _update(self):

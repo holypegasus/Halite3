@@ -109,7 +109,9 @@ class Position:
     return not self.__eq__(other)
 
   def __repr__(self):
-    return "{}({}, {})".format(self.__class__.__name__,
-                   self.x,
-                   self.y)
+    return "{}({}, {})".format(
+      # self.__class__.__name__,
+      'Pos',
+      self.x,
+      self.y)
 

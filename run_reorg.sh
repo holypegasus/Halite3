@@ -4,7 +4,7 @@
 function mv_if { 
   if [ -f $1 ]; then
     mv $1 $2;
-    echo "renamed!"
+    cat $2
   else
     > $2;
     echo "perfect :D"
