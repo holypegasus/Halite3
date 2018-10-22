@@ -16,10 +16,10 @@ class Player:
     self.id = player_id
     self.shipyard = shipyard
     self.halite_amount = halite
-    self._ships = {}
-    self._dropoffs = {}
+    self._ships = {} # sid -> Ship
+    self._dropoffs = {} # did -> Dropoff
 
-  def get_ship(self, ship_id):
+  def get_ship(self, ship_id): # sid -> Ship
     """
     Returns a singular ship mapped by the ship id
     :param ship_id: The ship id of the ship you wish to return
@@ -27,13 +27,13 @@ class Player:
     """
     return self._ships[ship_id]
 
-  def get_ships(self):
+  def get_ships(self): # -> [Ship]
     """
     :return: Returns all ship objects in a list
     """
     return list(self._ships.values())
 
-  def get_dropoff(self, dropoff_id):
+  def get_dropoff(self, dropoff_id): # did -> Dropoff
     """
     Returns a singular dropoff mapped by its id
     :param dropoff_id: The dropoff id to return
@@ -41,7 +41,7 @@ class Player:
     """
     return self._dropoffs[dropoff_id]
 
-  def get_dropoffs(self):
+  def get_dropoffs(self):  # -> [Dropoff]
     """
     :return: Returns all dropoff objects in a list
     """

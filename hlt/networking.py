@@ -10,7 +10,7 @@ LVL_INCR = 10
 LOG_LVL = logging.DEBUG
 # LOG_LVL = logging.INFO
 TURNS_FOCO = range(0, 0)
-# TURNS_FOCO = range(225, 228)
+# TURNS_FOCO = range(360, 370)
 
 
 class Game:

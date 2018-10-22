@@ -47,11 +47,10 @@ def mapl(func, itr):  return list(map(func, itr)) # actualize iterator
 def maps(funcs, itr): # map multiple functions over iterable
   for f in funcs: itr = map(f, itr)
   return itr
-
 """ <<<Game Begin>>> """
 game = hlt.Game()
 # TODO global preproc
-game.ready("5_TODO")
+game.ready("4_Terminal")
 
 ## GLOBAL
 me = game.me
@@ -178,7 +177,7 @@ def clj_terminal(): # CLJ -> terminal utils
   def depot_nearest(ship): # TODO
     return me.shipyard
   # Task.term: return to depot_nearest & ignore hit @depot
-  buffer_terminal = 3
+  buffer_terminal = 2
   def task_terminal(ship):
     turns2depot = dist_mtn(ship, depot_nearest(ship)) + buffer_terminal
     terminal = (
@@ -255,7 +254,7 @@ def get_moves(pos2val, rate_pick, if_inspired):
   sid_2_pos8val = OrderedDict() # sid:int -> (crd:(int, int), val:float)
   moves = []
   crds = set() # [crd]:(int, int)
-  for val, sid, move, pos_dst in vimps: # TODO improve curr GreedyAlgo
+  for val, sid, move, pos_dst in vimps:
     if (
       sid not in sid_2_pos8val 
       and (
@@ -278,8 +277,8 @@ def get_moves(pos2val, rate_pick, if_inspired):
 def get_spawn(moves, pos_taken):
   if all([
     game.turn_number <= 200,
-    # game.turn_number <= .5 * MAX_TURN,
     me.halite_amount >= const.SHIP_COST,
+    # not game_map[me.shipyard].is_occupied,
     not pos_taken(me.shipyard.position),
     ]):
     moves.append(me.shipyard.spawn())

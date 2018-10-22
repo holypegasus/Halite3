@@ -2,7 +2,7 @@
 import logging as log
 # log.getLogger().setLevel(log.WARNING) # silence -> upload
 import random
-from collections import Counter, OrderedDict
+from collections import OrderedDict
 from enum import Enum
 from itertools import chain, product
 from functools import partial
@@ -20,7 +20,7 @@ E = Direction.East
 W = Direction.West
 S = Direction.South
 O = Direction.Still
-Task = Enum('Task', 'roam drop term')
+Task = Enum('Task', 'roam drop')
 ## Utils
 # TODO recursive indent logitr
 def logitr(itr, header='', show=True, lvl=0):
@@ -42,45 +42,40 @@ def timit(f):
     log.info('%s: %.3fs', f.__name__, t1-t0)
     return res
   return timed
-def flatmap(func, itr): return chain(*map(func, itr))
+flatten = lambda lists: chain(*lists)
+def flatmap(func, itr): return flatten(map(func, itr))
 def mapl(func, itr):  return list(map(func, itr)) # actualize iterator
-def maps(funcs, itr): # map multiple functions over iterable
-  for f in funcs: itr = map(f, itr)
-  return itr
-
 """ <<<Game Begin>>> """
 game = hlt.Game()
-# TODO global preproc
-game.ready("5_TODO")
-
+# TODO preproc
+game.ready("3_Convolve")
 ## GLOBAL
 me = game.me
 game_map = game.game_map
 DIM_GAME = game_map.width
-DIM_MIN = 32 # [32, 64]
-MAX_TURN = 401 + 100 * max(0, (DIM_GAME / DIM_MIN - 1)) # [401, 501]
-turns_left = lambda : MAX_TURN - game.turn_number
+# dim: [32, 64]; n_turns: [401, 501]
+DIM_MIN = 32
+MAX_TURN = 401 + (DIM_GAME / DIM_MIN - 1) * 100
 age = lambda : game.turn_number / MAX_TURN  # [0., 1.]
 # NB decr curio -> start idling!
 # rate_fresh = lambda : .5 + age() # [.5, 0.]: incr curio
 # rate_fresh = lambda : 1 - age() # [1, 0.]: decr curio
 rate_fresh = lambda : .9 # constant curio
 # n_drop = lambda : const.MAX_HALITE * (.75 - .25*age())
-n_drop = lambda : const.MAX_HALITE * .75 # TODO
+n_drop = lambda :const.MAX_HALITE * .75
+# TODO memoize within rates-closure?
 
 ## INTERACT
-obj2pos = lambda o: o if isinstance(o, Position) else o.position
-def dist_mtn(obj0, obj1, show=False): # Manhattan
-  pos0 = obj2pos(obj0)
-  pos1 = obj2pos(obj1)
-  dx = abs(pos0.x - pos1.x)
-  dy = abs(pos0.y - pos1.y)
-  if show:  log.info((pos0, pos1, dx, dy))
+def dist(ship0, ship1):
+  pos0 = ship0.position
+  pos1 = ship1.position
+  dx = (pos0.x - pos1.x) % DIM_GAME
+  dy = (pos0.y - pos1.y) % DIM_GAME
   return dx+dy
 def get_ships_near(ship, perim=4):  # foe | mine
   ships_all = [s for p in game.players.values() for s in p.get_ships()]
   # logitr(ships_all, 'ships_all', False)
-  in_range = lambda s: s!=ship and dist_mtn(ship, s) <= perim 
+  in_range = lambda s: s!=ship and dist(ship, s) <= perim 
   return filter(in_range, ships_all)
 def clj_inspire(): # perturn CLJ -> Inspire status & utils
   record_inspired = dict()
@@ -143,22 +138,9 @@ def clj_param_pick(if_inspired): # perturn CLJ -> Halite pick-rate (Normal | Ins
 
 ## MOVE
 PREC = 3
-def clj_globals(): # CLJ -> global stuff
-  sid2task = dict()  # global; sid:int -> Task:Enum
-  def set_sid2task(sid, task):
-    sid2task[sid] = task
-  get_sid2task = lambda sid: sid2task.get(sid)
-  def update_globals():
-    # SID2TASK = {ship.id: SID2TASK[ship.id] for ship in me.get_ships()}
-    # log.warning(sid2task)
-    pass
-  def show_EOT_stats():
-    task2count = Counter(sid2task.values())
-    log.info(task2count)
-  return set_sid2task, get_sid2task, update_globals, show_EOT_stats
-set_sid2task, get_sid2task, update_globals, show_EOT_stats = clj_globals()
+SID2TASK = dict()  # global; int -> str
 pos2crd = lambda pos: (pos.x%DIM_GAME, pos.y%DIM_GAME)
-def clj_avoid_hits(): # perturn CLJ -> prevent self hits
+def avoid_hits(): # CLJ: prevent self hits
   crd2sid = dict()  # (int, int) -> sid
   def dst_taken(pos_dst):
     assert isinstance(pos_dst, Position)
@@ -170,30 +152,7 @@ def clj_avoid_hits(): # perturn CLJ -> prevent self hits
   # save_dst = lambda dst: crd2sid.add((dst.x%DIM_GAME, dst.y%DIM_GAME))
   def show_dsts():  logitr(crd2sid, 'crd2sid')
   return dst_taken, save_dst, show_dsts
-def clj_terminal(): # CLJ -> terminal utils
-  # first get ships to start returning
-  # later worry about potential "zipping"
-  crd_depots_mine = set(
-    maps([obj2pos, pos2crd], [me.shipyard] + me.get_dropoffs()))
-  def depot_nearest(ship): # TODO
-    return me.shipyard
-  # Task.term: return to depot_nearest & ignore hit @depot
-  buffer_terminal = 3
-  def task_terminal(ship):
-    turns2depot = dist_mtn(ship, depot_nearest(ship)) + buffer_terminal
-    terminal = (
-      ship.halite_amount > 0 # TODO val(depot_nearest) > 0
-      and turns2depot >= turns_left())
-    # if terminal:  log.info('%s -> %s: %s vs %s', ship, depot_nearest(ship), turns2depot, turns_left())
-    return terminal
-  # if ship's proposed destination is move_terminal
-  def move_terminal(sid, pos_dst):
-    return get_sid2task(sid)==Task.term and pos2crd(pos_dst) in crd_depots_mine
-  return task_terminal, move_terminal
 def get_moves(pos2val, rate_pick, if_inspired):
-  dst_taken, save_dst, show_dsts = clj_avoid_hits()
-  task_terminal, move_terminal = clj_terminal()
-
   def p8d2val(ship, pos_src, Dir): # Pos,Dir -> val
     pos_dst = p8d2pos(pos_src, Dir)
     r_fresh = 1. if Dir==O else rate_fresh() 
@@ -216,22 +175,17 @@ def get_moves(pos2val, rate_pick, if_inspired):
     return (val, ship.id, move, pos_dst)
   def get_vimps(ship): # Ship -> [(val, sid, Move, Pos)]
     sid = ship.id
-    task = get_sid2task(ship.id)
+    task = SID2TASK.get(ship.id)
     # set task
-    if task == Task.term: # sink state
-      pass
-    elif not task or ship.halite_amount == 0:
-      task = Task.roam
+    if not task or ship.halite_amount == 0:
+      task = SID2TASK[sid] = Task.roam
     elif task == Task.roam and ship.halite_amount >= n_drop():
-      task = Task.drop
-    elif task_terminal(ship):
-      task = Task.term
-    set_sid2task(sid, task)
+      task = SID2TASK[sid] = Task.drop
     log.debug('%s -> %s', ship, task)
     # gen vimps: seed w/ Stay unless on Shipyard -> don't Stay & block
     vimps = [] if ship.position==me.shipyard.position else [s8d2vimp(ship, O)]
     if wont_stall(ship): # enough fuel to move
-      if task in (Task.drop, Task.term):
+      if task == Task.drop:
         # _dir_drop = game_map.naive_navigate(ship, me.shipyard.position)
         Dirs_drop = game_map.get_unsafe_moves(ship.position, me.shipyard.position)
       else:
@@ -252,34 +206,30 @@ def get_moves(pos2val, rate_pick, if_inspired):
   ships_mine = sorted(me.get_ships(), key=lambda s: s.id)
   vimps = sorted(flatmap(get_vimps, ships_mine), reverse=True)
   logitr(vimps, 'vimps <- turn')
+  dst_taken, save_dst, show_dsts = avoid_hits()
   sid_2_pos8val = OrderedDict() # sid:int -> (crd:(int, int), val:float)
   moves = []
   crds = set() # [crd]:(int, int)
-  for val, sid, move, pos_dst in vimps: # TODO improve curr GreedyAlgo
-    if (
-      sid not in sid_2_pos8val 
-      and (
-        not dst_taken(pos_dst)
-        or move_terminal(sid, pos_dst))
-      ):
+  pos_taken = lambda pos: pos2crd(pos) in crds
+  for val, sid, move, pos_dst in vimps:
+    if sid not in sid_2_pos8val and not dst_taken(pos_dst):
       sid_2_pos8val[sid] = (val, pos_dst)
       save_dst(pos_dst, sid)
       moves.append(move)
       crds.add(pos2crd(pos_dst))
-  # sids_set = set(sid_2_pos8val.keys())
-  # sids_all = set(s.id for s in ships_mine)
-  # sids_left_only = sids_set - sids_all
-  # sids_right_only = sids_all - sids_set
+  sids_set = set(sid_2_pos8val.keys())
+  sids_all = set(s.id for s in ships_mine)
+  sids_left_only = sids_set - sids_all
+  sids_right_only = sids_all - sids_set
   # assert len(sids_set)==len(sids_all), (sids_left_only, sids_right_only)
   logitr(moves, 'moves')
-  pos_taken = lambda pos: pos2crd(pos) in crds # HACK for get_spawn
   return moves, pos_taken
 
 def get_spawn(moves, pos_taken):
   if all([
     game.turn_number <= 200,
-    # game.turn_number <= .5 * MAX_TURN,
     me.halite_amount >= const.SHIP_COST,
+    # not game_map[me.shipyard].is_occupied,
     not pos_taken(me.shipyard.position),
     ]):
     moves.append(me.shipyard.spawn())
@@ -290,7 +240,6 @@ def get_spawn(moves, pos_taken):
 def game_loop():
   game.update_frame()
   log.debug(game_map)
-  # update_globals()
   pos2val, show_value_matrix = clj_position_values()
   show_value_matrix()
   # refresh perturn memos
@@ -300,7 +249,6 @@ def game_loop():
   moves, pos_taken = get_moves(pos2val, rate_pick, if_inspired)
   moves_and_spawn = get_spawn(moves, pos_taken)
   # Submit & next
-  # show_EOT_stats()
   game.end_turn(moves_and_spawn)
 while True: game_loop()
 
