@@ -72,7 +72,7 @@ def maps(funcs, itr): # map multiple functions over iterable
 """ <<<Game Begin>>> """
 game = hlt.Game()
 # TODO global preproc
-game.ready("6_TODO")
+game.ready("5_Efficient")
 
 ## GLOBAL
 me = game.me

@@ -8,9 +8,10 @@ from .game_map import GameMap, Player
 
 LVL_INCR = 10
 LOG_LVL = logging.DEBUG
-# LOG_LVL = logging.INFO
+LOG_LVL = logging.INFO
+# LOG_LVL = logging.WARNING
 TURNS_FOCO = range(0, 0)
-# TURNS_FOCO = range(360, 370)
+# TURNS_FOCO = range(78, 80)
 
 
 class Game:

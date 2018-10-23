@@ -5,9 +5,10 @@ function mv_if {
   if [ -f $1 ]; then
     mv $1 $2;
     cat $2
+    echo "Errors! :O"
   else
     > $2;
-    echo "perfect :D"
+    echo "error FREE :D"
   fi
   }
 

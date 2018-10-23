@@ -16,20 +16,23 @@ function maybe_seed {
     echo "Seeded play"
   fi
   }
-# b0="bot_0_init"
-# b0="bot_1_eval"
-# b0="bot_2_param"
-# b0="bot_3_convolve"
-b0="bot_4_terminal"
+# b0="b0_init"
+# b0="b1_eval"
+# b0="b2_param"
+# b0="b3_convolve"
+# b0="b4_terminal"
+b0="b5_efficient"
 b1="MyBot"
 n=2
 # n=4
 dim=8  # check compile
-dim=16  # check valid
-# dim=32  # check real MIN
-# dim=64  # check real MAX
-# seed=1540178627
+# dim=16  # check valid
+# dim=24  # check Dropoff
+dim=32  # check MIN
+# dim=48  # check MED
+# dim=64  # check MAX
+# seed=1540185585
 
 maybe_seed
 ./run_reorg.sh
-# ./run_clear_replays.sh
+./run_clear_replays.sh
