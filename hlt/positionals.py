@@ -115,3 +115,6 @@ class Position:
       self.x,
       self.y)
 
+  def __hash__(self):
+    return hash(('Pos', self.x, self.y))
+

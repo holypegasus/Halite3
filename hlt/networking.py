@@ -10,8 +10,9 @@ LVL_INCR = 10
 LOG_LVL = logging.DEBUG
 LOG_LVL = logging.INFO
 # LOG_LVL = logging.WARNING
-TURNS_FOCO = range(0, 0)
-# TURNS_FOCO = range(78, 80)
+T0, TD = 0, 0
+# T0, TD = 47, 2
+TURNS_FOCO = range(T0, T0+TD+1)
 
 
 class Game:
@@ -32,7 +33,7 @@ class Game:
     num_players, self.my_id = map(int, read_input().split())
 
     logging.basicConfig(
-      filename="replays/bot-{}.log".format(self.my_id),
+      filename="bot-{}.log".format(self.my_id),
       filemode="w",
       level=LOG_LVL,
       format='<%(module)s.%(funcName)s:%(lineno)d> %(message)s')
@@ -54,14 +55,18 @@ class Game:
   def _stat_turn(self):
     worth_store = self.me.halite_amount
     ships_mine = self.me.get_ships()
-    worth_ships = len(ships_mine)*constants.SHIP_COST
+    n_depots = len(self.me.get_dropoffs())
+    worth_depots = n_depots * constants.DROPOFF_COST
+    n_ships = len(ships_mine)
+    worth_ships = n_ships * constants.SHIP_COST
     worth_cargo = sum(s.halite_amount for s in ships_mine)
-    worth_total = worth_store + worth_ships + worth_cargo
+    worth_total = worth_store + worth_depots + worth_ships + worth_cargo
 
-    logging.critical("<<< T{turn:03}: {store} + {ship} + {cargo} => {total} >>>".format(
+    logging.critical("<<< T{turn:03}: {store} + {depot}d + {ship}s + {cargo} ~> {total} >>>".format(
       turn=self.turn_number,
       store=worth_store,
-      ship=worth_ships,
+      depot=n_depots,
+      ship=n_ships,
       cargo=worth_cargo,
       total=worth_total,
       ))
@@ -76,6 +81,10 @@ class Game:
     :returns: nothing.
     """
     self.turn_number = int(read_input())
+
+    # to speedup testing
+    turn_terminal = TURNS_FOCO[-1]
+    if turn_terminal>0 and self.turn_number==turn_terminal: sys.exit(0)
     self._update_log_lvl() # to speedup testing
 
     for _ in range(len(self.players)):

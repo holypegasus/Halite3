@@ -1,5 +1,7 @@
 ideas.txt
 
+*.zip
 *.hlt
 *.log
+.mypy*
 hlt/__pycache__/

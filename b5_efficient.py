@@ -19,6 +19,7 @@ E = Direction.East
 W = Direction.West
 S = Direction.South
 O = Direction.Still
+from hlt.util import timit
 Task = Enum('Task', 'roam drop depot term')
 ## TODO -> utils
 def logret(header='', log_itr=False, show=True):
@@ -41,14 +42,6 @@ def logitr(itr, header='', show=True):
     strs_itr = [str(itr)]
   str_itr = '\n'.join(strs_itr)
   log.debug('%s: [%s]%s', header, len(itr), '\n'+str_itr if show else '')
-def timit(f):
-  def timed(*args, **kwargs):
-    t0 = time()
-    res = f(*args, **kwargs)
-    t1 = time()
-    log.info('%s: %.3fs', f.__name__, t1-t0)
-    return res
-  return timed
 def automemo(func_key=lambda k:k, dict_type=dict):
   d = dict_type()
   def wrap_func(f):
@@ -295,7 +288,7 @@ def get_spawn(moves, pos_free):
 
 
 """ <<<Game Loop>>> """
-@timit
+@timit()
 def game_loop():
   game.update_frame()
   log.info('Age: %.3f; r_fresh: %.3f; n_drop: %d', age(), rate_time(), n_drop())

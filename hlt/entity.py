@@ -34,7 +34,14 @@ class Dropoff(Entity):
   """
   Dropoff class for housing dropoffs
   """
-  pass
+  def __repr__(self):
+    return "{}({pid} : {sid} @{pos})".format(
+      self.__class__.__name__,
+      pid=self.owner,
+      sid=self.id,
+      pos=self.position,
+      )
+
 
 
 class Shipyard(Entity):
@@ -97,3 +104,8 @@ class Ship(Entity):
       sid=self.id,
       pos=self.position,
       cargo=self.halite_amount)
+
+  def __hash__(self):
+    return hash(('Ship', self.id))
+
+
