@@ -1,7 +1,11 @@
-ideas.txt
-
-*.zip
 *.hlt
 *.log
+*.pyc
+*.swp
+
+*/.DS_Store
 .mypy*
+ARK/b*/
 hlt/__pycache__/
+hlt_client
+.ipynb_checkpoints/

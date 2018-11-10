@@ -42,6 +42,8 @@ class Dropoff(Entity):
       pos=self.position,
       )
 
+  def __hash__(self):
+    return hash(('Depot', self.id))
 
 
 class Shipyard(Entity):
@@ -98,7 +100,7 @@ class Ship(Entity):
     return ship_id, Ship(player_id, ship_id, Position(x_position, y_position), halite)
 
   def __repr__(self):
-    return "{}({pid} : {sid} @{pos} ${cargo})".format(
+    return "{}({pid}:{sid} @{pos} ${cargo})".format(
       self.__class__.__name__,
       pid=self.owner,
       sid=self.id,
@@ -108,4 +110,6 @@ class Ship(Entity):
   def __hash__(self):
     return hash(('Ship', self.id))
 
+  def __lt__(self, other):
+    return self.id < other.id
 

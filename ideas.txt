@@ -1,0 +1,170 @@
+Rules
+  Spawn
+    store -= 1000
+  Move(n,e,w,s)
+    ship.cargo -= floor $ 0.1 * val(cell_src)
+    Stay if not enough
+  Move(o) / Stay / Pick
+    ship.cargo += ceil $ 0.25 * val(cell_src)
+  Depot
+    store -= 4000 - (ship.cargo + val(cell_src) )
+  Hit
+    ships die
+    val(cell_src) += both ship.cargo 
+  Inspire
+    trigger: >=2 any foe-ships within <=4 cells
+    effect: Pick *= 3?
+
+
+?Strat
+  Spawn <> Depot <> Move: all related??
+  ?Inspire
+  ?Evade
+?Eval
+  Preprocess (perturn) tile-wise cheapest path
+    src, dst -> dir, cost
+  Better task-assign
+    pick vs Return?  consider 1) val(pick) 2) cost(return)
+  Rank moves
+    aggregate n-way val > greedy 2-way comp
+?Depot
+  ! improve resource/future-val tradoff 
+    https://halite.io/play/?game_id=1400892&replay_class=1&replay_name=replay-20181104-002347%2B0000-1541290951-56-56-1400892
+  eval {ships, depots} x {mine, foe}
+  impl Voronoi
+    might need global convolved value map?
+    "Voronoi tribute zones"
+      equi-time-distant 
+    build Depot if
+      val(area_ship) - val(area_depot_nearest) > cost2build
+        val(area): mask convolve over vals
+              2
+            2 1 2
+          2 1 0 1 2
+            2 1 2
+              2
+        area: Voronoi zones
+    eval(pos, perim=.5*depot_nearest(pos))
+      compare strength of Voronoi-zones
+      if Depot, save till later
+    depot if cost-saving > cost
+      cost-saving: sum(curr ret ships travel costs - after)
+      cost: p_ship + p_depot - cargo - val_pos
+?Spawn
+  calc sum(discounted future returns)
+  dist-weighed potential
+  age
+?games.py
+  fix stats collection
+  plot / time
+    game_loop durations
+    bots' relative strengths
+      store vs kapital vs accts
+      -> inflection pts
+
+CLEANUP get_comms!
+
+
+Roadmap  1.1105
+MOVE => GOAL
+Eval goal
+  ~~~ Floyd-Warshall (FW) ~~~  3.1107
+  + halite
+  - cost 2 cell
+    FW gives this for free :D
+  ~~~ custom ~~~
+  - cost 2 depot_nearest
+    1 depots curr nearest
+    2 depots curr+planned nearest
+  / cost time
+Depot
+  incr depot attraction by reduced return cost during eval
+  1 calc not simply bisect but rather Voronoi exclusion zone vs all other Depots
+  2 ship & depot foe
+Spawn
+  hlt x dist
+Guess & Evade|Hit
+  foe Task
+    halite_amount
+    last move
+    location
+    area balance
+
+
+turnly preproc/memo path-map
+  foreach tile T -> save cheapest (cost_move, ngbr N)
+seek Pick & Depot
+  scan.eval tiles nearby 
+    path_cheapest(pos0, pos1)
+    + cost to depot_nearest
+    replace/augment curr param-based eval
+Evade vs Hit
+  model foe move possibility payoffs
+  risk of Evade <- prob_hit * val(cargo_self) + val(pos_tgt) - val(cargo_foe)
+  diff(cargos)
+  diff(dist * cargo-spaces)
+! greedy algo -> occasional collisions when later ships run out of options
+  2 16 1541476562
+
+
+7_Goal 0.1104 - ?
+  Utils
+    pushed util-code into lib
+    adapted from Halite2
+      submit.sh -> archive.sh
+      games.py
+  refactor cljs
+  distinguish Delta from Position
+  start Zone-ish code
+  refine task_terminal
+    buffer_terminal <- all ships_mine nearer same depot // 4
+  2.1107
+    Jupyter Notebook -> DynProg shortest-path
+  3.1107
+    Floyd-Warshall -> pairwise shortest-path
+  4.1108 TODO
+    ship > scan perim(n?=DIM/4) -> backtrack to eval Moves
+    eval Move <- apply FW
+      forward -> cost(move) & cost(depot_nearest)
+      backward 
+    greedy vimps -> knapsack alloc?
+5.1102 6_Depot
+  fixed Manhattan-dist calc on torus
+  ?Depot
+    init logic using naive bisect-eval vs depot_nearest
+2.1030 5_Efficient
+  ?Eval
+    %max-cargo for drop: .75 -> .9
+    cost_move: 2*move away from pos_src ???
+0.1021 4_Terminal
+  ?Eval
+    鸣金收官
+      return to depot_nearest if turns2end - dist_turn(depot_nearest) <= X
+6. 3_Convolve
+  ?Eval
+    vision++
+      preproc value-matrix <- convolve 1-step ngbrs
+      v(O + r_fresh*sum(N,E,W,S))
+    cleanup get_moves
+      vimp <- (val, sid, Move, Pos_dst)
+      merge & sort all vimps into global-queue
+      bump up constrained moves w/ large constant
+      skip any already-allocated 
+  ?Utils
+    pandas DataFrame show
+      GameMap
+      ValueMatrix
+    dynamically adjust logging-level
+4. 2_Param
+  paramize constants
+    game age
+      rate decay/keep
+    rate pick <- if_inspired
+  ?Hit
+    modulo Positional arithmetic
+3. 1_Eval
+  ?Eval
+    evaluate & rank moves
+2.1016 0_Init
+  tutorial & reorg
+2018

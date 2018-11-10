@@ -1,11 +1,13 @@
-import queue
+# import queue
 
+import numpy as np
 import pandas as pd
 
 from . import constants
 from .entity import Entity, Shipyard, Ship, Dropoff
 from .positionals import Direction, Position
 from .common import read_input
+from .util import timit
 
 
 class Player:
@@ -68,6 +70,7 @@ class Player:
     player, shipyard_x, shipyard_y = map(int, read_input().split())
     return Player(player, Shipyard(player, -1, Position(shipyard_x, shipyard_y)))
 
+  # TODO turnly re-init -> persist | delete
   def _update(self, num_ships, num_dropoffs, halite):
     """
     Updates this player object considering the input from the game engine for the current specific turn.
@@ -145,9 +148,14 @@ class GameMap:
   def __init__(self, cells, width, height):
     self.width = width
     self.height = height
-    self._cells = cells # matrix: [height, width]
-
-  # -> Pos | Ent
+    self._cells = cells # [[MapCell]] : [y][x]
+  # USR: -> halite-matrix [y,x]
+  # @timit('warn')
+  def map_hlt(self):
+    hlt_yx = [[cell.halite_amount for cell in row] 
+      for row in self._cells]
+    return np.asarray(hlt_yx)
+  # Pos | Ent -> MapCell
   def __getitem__(self, location):
     """
     Getter for position object or entity objects within the game map
@@ -160,17 +168,17 @@ class GameMap:
     elif isinstance(location, Entity):
       return self._cells[location.position.y][location.position.x]
     return None
-
+  # USR:
   def __repr__(self):
     mapcell2hlt = lambda mc: mc.halite_amount
     cell2hlt = [map(mapcell2hlt, mcs) for mcs in self._cells]
-    df_cell2hlt = pd.DataFrame(cell2hlt)
     return '{name}({width} x {height})\n{halites}'.format(
       name=self.__class__.__name__,
       width=self.width,
       height=self.height,
-      halites=df_cell2hlt)
-
+      halites=pd.DataFrame(cell2hlt))
+  ## BASE
+  # Mtn-dist between Positions
   def calculate_distance(self, source, target):
     """
     Compute the Manhattan distance between two locations.
@@ -196,6 +204,7 @@ class GameMap:
     """
     return Position(position.x % self.width, position.y % self.height)
 
+  ## NAVI
   @staticmethod
   def _get_target_direction(source, target): # Pos, Pos -> (Dir, Dir)
     """
@@ -207,7 +216,7 @@ class GameMap:
     """
     return (Direction.South if target.y > source.y else Direction.North if target.y < source.y else None,
         Direction.East if target.x > source.x else Direction.West if target.x < source.x else None)
-
+  # ignore collision
   def get_unsafe_moves(self, source, destination): # Pos, Pos -> [Dir]
     """
     Return the Direction(s) to move closer to the target point, or empty if the points are the same.
@@ -230,8 +239,8 @@ class GameMap:
       possible_moves.append(y_cardinality if distance.y < (self.height / 2)
                   else Direction.invert(y_cardinality))
     return possible_moves
-
-  def naive_navigate(self, ship, destination):
+  # avoid collision
+  def naive_navigate(self, ship, destination): # Ship,Pos->[Dir]
     """
     Returns a singular safe move towards the destination.
 
@@ -246,11 +255,11 @@ class GameMap:
       if not self[target_pos].is_occupied:
         self[target_pos].mark_unsafe(ship)
         return direction
-
     return Direction.Still
 
+  ## SYS
   @staticmethod
-  def _generate():
+  def _generate(): # -> GameMap NB [y;x] !
     """
     Creates a map object from the input given by the game engine
     :return: The map object

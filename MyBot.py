@@ -1,325 +1,367 @@
 #!/usr/bin/env python3.6
-import enum, random, traceback
+import enum, math, random, time, traceback
 from collections import Counter, OrderedDict
-from itertools import chain, product
 from functools import partial
-import math
+from itertools import chain, product
+from operator import (
+  lt, le, eq, ne, ge, gt,
+  contains
+  )
 from statistics import mean
 from typing import Tuple, List
-Crd = Tuple[int, int]
 
+import numpy as np
 import pandas as pd
 
 import hlt
-from hlt import constants as const
-from hlt.positionals import Direction as Dir, Position as Pos
-Dirs4 = [Dir.North, Dir.East, Dir.West, Dir.South]
-O = Dir.Still
-from hlt.util import *
-LVL_TIMIT = 'warn'
-Task = enum.Enum('Task', 'roam drop depot term')
+from hlt import commands as cmds, constants as const
+from hlt.param import TURN_LAST_SPAWN
+from hlt.positionals import Direction as Dir, Position as Pos, Delta as Dlt, Zone
+from hlt.transform import (
+  logmat,
+  obj2pos, # TRANSFORM
+  DIRS4, DIR_O, DIRS_ALL,
+  dist, # GAME
+  init_map_depot,
+  scan, 
+  )
+from hlt.util import (
+  flatmap, mapl, maps_itr, maps_func, memo, # DATA
+  asrt, lvl2lgr, log, logitr, logaz, timit, # DEBUG
+  )
+timit = timit('warn')
+
+spawn_cap = lambda: True # normal
+# spawn_cap = lambda: which_turn()<TURN_LAST_SPAWN # FOCO turns
+# spawn_cap = lambda : len(ships_mine())<2 # FOCO test
 """ <<<Game Begin>>> """
 game = hlt.Game()
-# TODO global preproc
-game.ready("6_Depot")
-## GLOBAL
+## CONSTS
+R_COST_MOVE = 1 / const.MOVE_COST_RATIO # 0.1
+R_EXTRACT_NORMAL = 1 / const.EXTRACT_RATIO # 0.25
+N_RADIUS_INSPIRE = const.INSPIRATION_RADIUS # 4
+N_FOE_INSPIRE = const.INSPIRATION_SHIP_COUNT # 2
+R_EXTRACT_INSPIRED = (1+const.INSPIRED_BONUS_MULTIPLIER) / const.EXTRACT_RATIO # 0.75
+# log.warning((R_COST_MOVE,R_EXTRACT_NORMAL,N_RADIUS_INSPIRE,N_FOE_INSPIRE,R_EXTRACT_INSPIRED))
+Task = enum.Enum('Task', 'roam drop raid term')
+# TIMEOUT_BREAKER = 1.600 # secs
+## VARS
 me = game.me
-game_map = game.game_map
-DIM_GAME = game_map.width
+gm = game.game_map
+DIM_GAME = gm.width # == gm.height
 DIM_MIN = 32 # [32, 64]
-MAX_TURN = 401 + 100 * max(0, (DIM_GAME / DIM_MIN - 1)) # [401, 501]
-turns_left = lambda : MAX_TURN - game.turn_number
-age = lambda : game.turn_number / MAX_TURN  # [0., 1.]
-# NB decr curio -> start idling!
-# r_curio = lambda : .8 + .2*age() # ++ curio
-# r_curio = lambda : 1 - age() # -- curio
-r_curio = lambda : .9 # == curio
-# n_drop = lambda : const.MAX_HALITE * (.75 + .2*age()) # ++ 
-# n_drop = lambda : const.MAX_HALITE * (.95 - .45*age()) # --
+MAX_TURN = const.MAX_TURNS + 1 # [401, 501]
+log.warning('max turn: %d; turn_last_spawn: %d', MAX_TURN, TURN_LAST_SPAWN)
+which_turn = lambda : game.turn_number
+turns_left = lambda : MAX_TURN - which_turn()
+age = lambda : which_turn() / MAX_TURN  # [0., 1.]
+r_decay = lambda : .9# + .1*age() # < .75 post-collection to avoid vasci
+r_depot_decay = lambda : .8 # slower decay for depot-eval?
+exp_depot_decay = lambda : 1 # cost-exponent on r_decay for eval_depot
+n_perim = lambda : 2#DIM_GAME//8
 n_drop = lambda : const.MAX_HALITE * .95 # ==
-# n_perim = lambda : round(2 + 2*age())
-n_perim = lambda : 2
-exp_depot = lambda : 1.5 # cost-exponent on r_curio for eval_depot
-## EVAL
-# move_random = lambda : random.choice(Dir.get_all_cardinals())
-obj2pos = lambda o: o if isinstance(o, Pos) else o.position
-pos2crd = lambda pos: (pos.x%DIM_GAME, pos.y%DIM_GAME)
-pos2hlt = lambda p: game_map[p].halite_amount
-def p8d2pos(pos_src, Dir): # Pos,Dir -> Pos
-  # log.info((pos_src, Dir))
-  pos_dst = pos_src.directional_offset(Dir)
-  return game_map.normalize(pos_dst)
-crds_all = tuple(product(list(range(DIM_GAME)), list(range(DIM_GAME))))
-
-def pos8crd2pos(pos: Pos, crd: Crd) -> Pos: return game_map.normalize(pos + Pos(*crd))
-@automemo()
-def gen_ngbr_dxys(dist):
-  dxs = range(-dist, dist+1)
-  dys = range(-dist, dist+1)
-  dxys = sorted(set((dx,dy) for dx in dxs for dy in dys if abs(dx)+abs(dy)==dist))
-  return dxys
-@automemo()
-def gen_ring(origin, dist): # ring of Pos dist-away from origin [4*d]
+turn_last_spawn = lambda : TURN_LAST_SPAWN # TODO -> smarter eval sum(ship.val_future)
+## PREPROC <= 30sec
+# def clj_preproc():  pass # TODO static game info
+game.ready('_'.join(map(str, ['b8_scan', n_perim(), r_decay()])))
+## EVAL, MOVE, DEPOT
+def clj_globals(lvl='info'): # global CLJ -> NB objs get recreated every turn
+  sid2task = dict()  # sid:int -> Task:Enum
+  def set_ship2task(ship, task): sid2task[ship.id] = task
+  get_ship2task = lambda ship: sid2task.get(ship.id)
+  val_depot_best = [-np.inf]
+  get_vdb = lambda: val_depot_best[0]
+  def set_vdb(vdb_better):
+    val_depot_best[0] = vdb_better
+  return set_ship2task, get_ship2task, get_vdb, set_vdb
+set_ship2task, get_ship2task, get_vdb, set_vdb = clj_globals()
+# move_random = lambda : random.choice(DIRS4)
+pos2hlt = lambda pos: gm[pos].halite_amount
+def p8d2pos(pos_src, _dir): return gm.normalize(pos_src + Dlt(*_dir))
+@memo()
+def gen_ngbr_dxys(dist) -> List[Dlt]: # [Dlt] dist-away
+  dxs = dys = range(-dist, dist+1)
+  return sorted(set(Dlt(dx, dy)
+    for (dx, dy) in product(dxs, dys)
+    if abs(dx)+abs(dy)==dist))
+@memo()
+def gen_ring(origin, dist): # ring of Pos dist-away [4*d] -> [(dist:int, Pos)]
   dxys = gen_ngbr_dxys(dist)
-  return [(dist, pos8crd2pos(origin, dxy)) for dxy in dxys]
-@automemo()
+  pos_origin = obj2pos(origin)
+  return [(dist, gm.normalize(pos_origin+dxy)) for dxy in dxys]
+@memo()
 def pos2dist8ngbrs(pos, perim) -> [(int, Pos)]:
-  part_gen_ring = partial(gen_ring, pos)
-  return flatmap(part_gen_ring, range(1, perim+1))
-# @timit(LVL_TIMIT) # ! bulk of processing here
-def clj_eval(lvl='debug'): # perturn CLJ: eval Pos
+  return flatmap(partial(gen_ring, pos), range(1, perim+1))
+def clj_eval(lvl='debug'): # turnly CLJ: eval Pos
   # NB: hlt: curr tile worth; val: extended worth
-  # @automemo(lvl=lvl)
+  # time-decayed worth of nearby cell
   def calc_val_ngbr(dist:int, pos:Pos, exp=1):
-    return round(pos2hlt(pos) * (r_curio()**exp)**dist)
-  # @logret(lvl)
-  def crd2val(crd, perim=n_perim()): # TODO improv!
-    x, y = crd
-    pos = Pos(x, y)
-    hlt_self = pos2hlt(pos)
-    vals_ngbrs = [calc_val_ngbr(d, pos_ngbr) for d, pos_ngbr in pos2dist8ngbrs(pos, perim)]
-    # val_total = round(hlt_self + mean(vals_ngbrs), 2)
-    val_total = round(hlt_self + mean(vals_ngbrs))
-    return val_total
-  @automemo()
+    return round( pos2hlt(pos) * r_depot_decay()**(exp*dist) )
+  @memo()
   def eval_area(obj, perim):
     pos = obj if isinstance(obj, Pos) else obj.position
-    hlt_self = pos2hlt(pos)
-    vals_ngbrs = [calc_val_ngbr(d, pos_ngbr, exp_depot()) for d, pos_ngbr in pos2dist8ngbrs(pos, perim)]
-    val_total = round(hlt_self + sum(vals_ngbrs))
-    return val_total
-  def pos2val(pos, perim=1):
-    # TODO compare strength of Voronoi-zones -> if build Depot
-    return mat_vals[pos.x][pos.y]
-  def show_value_matrix(): 
-    df_vals = pd.DataFrame(mat_vals) # NB [x][y]
-    # annotate
-    df_show = df_vals.copy()
-    pos_shipyard = me.shipyard.position
-    df_show[pos_shipyard.x][pos_shipyard.y] = '{%s}'%(df_show[pos_shipyard.x][pos_shipyard.y])
-    for s in ships_mine():
-      df_show[s.position.x][s.position.y] = '[%s]'%(df_show[s.position.x][s.position.y])
-    LVL2LGR[lvl]('\n%s', df_show)
-  @logret(lvl)
-  def eval_depot(ship, depot_nearest_ship): # TMP refine!
-    d = dist_mtn(ship, depot_nearest_ship)
-    d_half = int(d/2)
-    if d_half > 0:
-      val_ship = eval_area(ship, d_half) + ship.halite_amount - const.SHIP_COST
-      val_shipyard = eval_area(depot_nearest_ship, d_half)
-      return round(val_ship - val_shipyard - const.DROPOFF_COST/(1-age()))
+    hlt_here = pos2hlt(pos)
+    vals_ngbrs = [calc_val_ngbr(d, pos_ngbr, exp_depot_decay()) for d, pos_ngbr in pos2dist8ngbrs(pos, perim)]
+    return round(hlt_here + sum(vals_ngbrs))
+  @memo()
+  # TODO just analyze map_decay(perim=d_half) + map_depot_propose
+  def eval_depot(ship, depot_nearest_ship):
+    dist = dist_mtn(ship, depot_nearest_ship)
+    d_half = dist//2
+    if d_half > 1:
+      val_area_ship = eval_area(ship, d_half) * r_depot_decay()**exp_depot_decay()
+      val_area_depot_nearest = eval_area(depot_nearest_ship, d_half)
+      cost_depot = (const.DROPOFF_COST - ship.halite_amount)/(1-age()) + const.SHIP_COST # TMP measure of ship's future val
+      return round(val_area_ship - val_area_depot_nearest - cost_depot)
     else:
-      return -1
-  mat_vals = [[crd2val((x,y)) 
-    for y in range(DIM_GAME)] 
-    for x in range(DIM_GAME)] # NB get[x][y]
-  return pos2val, show_value_matrix, eval_depot
-ship2id = lambda ship: ship2id
+      return -np.inf
+  return eval_depot
 
-@automemo()
-def dist_mtn(obj0, obj1): # Manhattan
-  pos0 = obj2pos(obj0)
-  pos1 = obj2pos(obj1)
-  dx = abs(pos0.x - pos1.x)
-  dy = abs(pos0.y - pos1.y)
-  return min(dx, DIM_GAME-dx) + min(dy, DIM_GAME-dy)
-# @timit(LVL_TIMIT)
-def clj_inspire(): # perturn CLJ -> Inspire status & utils
-  # record_inspired = dict()
-  def get_ships_near(ship, perim=4):  # foe | mine
-    ships_all = [s for p in game.players.values() for s in p.get_ships()]
-    # logitr(ships_all, 'ships_all', False)
-    in_range = lambda s: s!=ship and dist_mtn(ship, s) <= perim 
-    return filter(in_range, ships_all)
-  @automemo(ship2id)
-  # @logret()
-  def if_inspired(ship):
-    is_ship_foe = lambda s: s.owner != me.id
-    ships_foe = list(filter(is_ship_foe, get_ships_near(ship)))
-    # logitr(ships_foe, 'ships_foe near %s'%ship, False)
-    return len(ships_foe) > 1
-  return if_inspired
-
-cost4move = lambda pos_src: .1 * pos2hlt(pos_src)
-wont_stall = lambda ship: cost4move(ship.position) <= ship.halite_amount
-# @timit(LVL_TIMIT)
-def clj_param_pick(if_inspired): # perturn CLJ -> Halite pick-rate (Normal|Inspired)
-  record_pick = dict()
-  @automemo(ship2id)
-  def rate_pick(ship):  return .75 if if_inspired(ship) else .25
-  return rate_pick
-
-## MOVE
-def clj_globals(lvl='info'): # CLJ -> TMP tasks
-  sid2task = dict()  # global; sid:int -> Task:Enum
-  def set_sid2task(sid, task):
-    # log.debug('%s -> %s', ship, task)
-    sid2task[sid] = task
-  get_sid2task = lambda sid: sid2task.get(sid)
-  def show_EOT_stats():
-    logitr(sid2task, 'sid2task', lvl=lvl)
-    # logitr(Counter(sid2task.values()), 'task2count', lvl=lvl)
-  return set_sid2task, get_sid2task, show_EOT_stats
-set_sid2task, get_sid2task, show_EOT_stats = clj_globals()
-ships_mine = lambda : sorted(me.get_ships(), key=lambda s: s.id)
-# @timit(LVL_TIMIT)
-def clj_track_turn(get_sid2task, lvl='info'): # perturn CLJ -> prevent self hits
-  sid_2_task8mov8val = OrderedDict() # sid:int -> (move:str, val:float)
-  crds_taken = set() # [crd]:(int, int)
+def pos2xy(pos, dim=DIM_GAME): return (pos.x%dim, pos.y%dim)
+def obj2xy(obj, dim=DIM_GAME): return pos2xy(obj2pos(obj), dim)
+@memo(f_key=lambda objs: tuple(map(obj2xy, objs)))
+def dist_mtn(obj0, obj1): return dist(gm, obj0, obj1)
+# TODO expand this into cost2depot_nearest
+cost4move = lambda pos_src: R_COST_MOVE * pos2hlt(pos_src)
+will_stall = lambda ship: ship.halite_amount < cost4move(ship.position)
+def clj_move(get_ship2task, lvl='info'): # turnly CLJ
+  ship_2_task8mov8val = OrderedDict() # Ship -> (Task, move:str, val:float)
+  ship_free = lambda ship:  ship not in ship_2_task8mov8val
+  xy_taken = set() # xy
+  take_pos = lambda obj:  xy_taken.add( pos2xy(obj2pos(obj)) )
+  pos_free = lambda obj:  pos2xy(obj2pos(obj)) not in xy_taken
   moves = []
-  def save(val, sid, move, pos):
+  def save_vimp(val, ship, move, pos):
     mov = move.split()[-1]
-    sid_2_task8mov8val[sid] = get_sid2task(sid), mov, val
-    crds_taken.add(pos2crd(pos))
+    ship_2_task8mov8val[ship] = get_ship2task(ship), mov, val
+    take_pos(pos)
     moves.append(move)
-  sid_free = lambda sid:  sid not in sid_2_task8mov8val
-  def pos_free(obj):
-    pos = obj if isinstance(obj, Pos) else obj.position
-    return pos2crd(pos) not in crds_taken
   def export_moves(show=False):  # copy to prevent mutation
     moves_copied = [m for m in moves]
-    if show:  logitr(moves_copied)
+    if show:  logitr(moves_copied, lvl=lvl)
     return moves_copied
-  def show_ship_asmts():
-    logitr(sid_2_task8mov8val, 'sid_2_task8mov8val', lvl=lvl)
-  return save, sid_free, pos_free, export_moves, show_ship_asmts
-# @timit(LVL_TIMIT)
-def clj_depot(lvl='info'): # CLJ -> terminal utils
-  depots_mine = [me.shipyard] + me.get_dropoffs()
-  crd_depots_mine = set(maps([obj2pos, pos2crd], depots_mine))
-  @automemo()
-  def depots_by_dist(ship): # by dist ASC
-    return sorted(depots_mine, key=lambda depot: dist_mtn(depot, ship))
+  # Inspire status & utils
+  def get_ships_near(ship, perim):  # foe | mine
+    ships_all = [s for p in game.players.values() for s in p.get_ships()]
+    in_range = lambda s: s!=ship and dist_mtn(ship, s) <= perim 
+    return filter(in_range, ships_all)
+  @memo()
+  def if_inspired(ship):
+    # is_ship_foe = lambda s: s.owner != me.id
+    # ships_foe = list(filter(is_ship_foe, get_ships_near(ship, perim=4)))
+    ships_foe = [s for s in get_ships_near(ship, N_RADIUS_INSPIRE) if s.owner!=me.id]
+    return len(ships_foe) >= N_FOE_INSPIRE
+  @memo() # Halite pick-rate (Normal|Inspired)
+  def rate_pick(ship):  
+    return R_EXTRACT_INSPIRED if if_inspired(ship) else R_EXTRACT_NORMAL
+  return rate_pick, save_vimp, ship_free, take_pos, pos_free, export_moves
+#TODO refresh turnly otherwise mem-leak!
+@memo(f_key=lambda _: which_turn())
+def ships_mine():  return sorted(me.get_ships(), key=lambda s: s.id)
+@memo(f_key=lambda _: which_turn())
+def pos2ship_mine():  return {s.position: s for s in ships_mine()}
+def clj_depot(lvl='info'): # turnly CLJ -> depot & terminal
+  depots_mine = frozenset([me.shipyard] + me.get_dropoffs())
+  crd_depots_mine = set(maps_itr([obj2pos, pos2xy], depots_mine))
+  @memo()
+  def depot_nearest(ship):
+    return min(depots_mine, key=lambda depot: dist_mtn(depot, ship))
+  # very HACK...
   saving4depot = set()
-  def if_depoting():  return len(saving4depot)>0
-  @logret(lvl=lvl)
-  def toggle_depot(sid):
-    saving4depot.add(sid)
+  def sv4depot():  return len(saving4depot)>0
+  @logaz('za', lvl=lvl)
+  def toggle_depot(ship): # register ship as waiting2/building depot
+    saving4depot.add(ship)
     return saving4depot
-  # Task.term: return to depot_nearest & ignore hit @depot
-  # @logret()
-  def task_terminal(ship, depot_nearest_ship):
-    buffer_terminal = 3
-    turns2depot = dist_mtn(ship, depot_nearest_ship) + buffer_terminal
+  # Task.term -> return to depot_nearest & ignore hit @depot
+  def task_terminal(ship):
+    dist2return = dist_mtn(ship, depot_nearest(ship))
+    ship_ahead_in_queue = lambda other: all([
+      other!=ship,
+      depot_nearest(other)==depot_nearest(ship),
+      dist_mtn(other, depot_nearest(ship))<=dist_mtn(ship, depot_nearest(ship)), # NB ahead | equal
+      ])
+    # TMP really we want n_ships in quadrant that might compete for queue
+    n_ships_ahead_in_queue = len(mapl(ship_ahead_in_queue, ships_mine()))//(4* len(depots_mine)) + 1
+    turns2depot = dist2return + n_ships_ahead_in_queue
     terminal = (
-      ship.halite_amount > 0 # TODO val(depot_nearest) > 0
+      ship.halite_amount > 0 # TODO val(-> depot_nearest) > 0
       and turns2depot >= turns_left())
     return terminal
-  def move_terminal(sid, pos_dst): # if ship to complete Task.term next
-    return (get_sid2task(sid)==Task.term 
-      and pos2crd(pos_dst) in crd_depots_mine)
-  return task_terminal, move_terminal, if_depoting, toggle_depot, depots_by_dist
-task_terminal, move_terminal, if_depoting, toggle_depot, depots_by_dist = clj_depot()
+  def move_terminal(ship, pos_dst): # to complete Task.term
+    return (get_ship2task(ship)==Task.term 
+      and pos2xy(pos_dst) in crd_depots_mine)
+  return task_terminal, move_terminal, sv4depot, toggle_depot, depots_mine, depot_nearest
 
-# @timit(LVL_TIMIT)
-def get_moves(pos2val, rate_pick, if_inspired, eval_depot):
-  save, sid_free, pos_free, export_moves, show_ship_asmts = clj_track_turn(get_sid2task)
-  task_terminal, move_terminal, if_depoting, toggle_depot, depots_by_dist = clj_depot()
-
-  def s8d2val(ship, Dir): # Pos,Dir -> val
-    pos_src = ship.position
-    pos_dst = p8d2pos(pos_src, Dir)
-    r_fresh = 1. if Dir==O else r_curio() 
-    cost_move = 0. if Dir==O else -(
-      2*cost4move(pos_src)) # TODO does this even make sense?
-    assert cost_move <= 0, (cost_move, 0)
-    # log.debug('%s val: %s', pos_dst, pos2val(pos_dst))
-    val_pos_dst = math.ceil(rate_pick(ship) * pos2val(pos_dst)) * r_fresh
-    # log.debug('%s -> %s: val_pos_dst: %.1f; cost_move: %.1f', pos_src, Dir, val_pos_dst, cost_move)
-    return val_pos_dst + cost_move
-  def s8d2vimp(ship, Dir, drop=False): # Ship,Dir -> val,sid,Move,Pos
-    # log.debug('drop? %s', drop)
-    val = s8d2val(ship, Dir)
-    if drop:
-      val = val + ship.halite_amount
-    val = round(val)
-    # log.debug(val)
-    move = ship.move(Dir)
-    pos_dst = p8d2pos(ship.position, Dir)
-    return (val, ship.id, move, pos_dst)
-  def get_vimps(ship): # Ship -> [(val, sid, Move, Pos)]
-    sid = ship.id
-    task = get_sid2task(ship.id)
-    depot_nearest_ship = depots_by_dist(ship)[0]
-    # set task
+def same_pos(o0, o1):
+  return obj2pos(o0) == obj2pos(o1)
+def obj2yx(obj, dim):
+  x, y = obj2xy(obj, dim)
+  return y, x
+# @timit
+def get_comms(t0, map_hlt, lvl='info'):
+  logf=lvl2lgr(lvl)
+  """# TIMEOUT_BREAKER
+    td = time.time() - t0
+    if td > TIMEOUT_BREAKER:
+      log.critical('Break timeout after %.2fs: %s/%s !', td, i, len(vimps))
+      break"""
+  eval_depot = clj_eval(lvl=lvl)
+  rate_pick, save_vimp, ship_free, take_pos, pos_free, export_moves = clj_move(get_ship2task)
+  task_terminal, move_terminal, sv4depot, toggle_depot, depots_mine, depot_nearest = clj_depot()
+  ## SCAN stuff
+  # map_hlt = gm.map_hlt()
+  _yx_ships = set(obj2yx(s,len(map_hlt)) for s in ships_mine())
+  _yx_depots_mine = set(obj2yx(d,len(map_hlt)) for d in depots_mine)
+  # OPTI? each depot only calcs enough to partial overlap another
+  depot2map = {} # each depot -> map_depot 
+  for depot in depots_mine:
+    dist_ship_furthest2depot = max(dist_mtn(depot, s) for s in ships_mine()+[depot])
+    radius_depot_scan = dist_ship_furthest2depot + n_perim() + 1
+    depot2map[depot] = init_map_depot(_map=gm.map_hlt(), depot=obj2yx(depot, DIM_GAME), perim=radius_depot_scan, lvl=lvl)
+  ## Goal-major Moves
+  # TODO scan perim -> backtrack eval$moves -> knapsack pick
+  # @timit
+  def scan_maps(map_hlt, ship):
+    # logf('%s scanning maps...', ship)
+    yx_ship = obj2yx(ship, DIM_GAME)
+    map_depot = depot2map[depot_nearest(ship)]
+    map_hlt,map_depot,map_cost,map_val,map_back = scan(
+      map_hlt, map_depot, yx_ship, perim=n_perim(), r_decay=r_decay(), r_cost_move=R_COST_MOVE, lvl=lvl)
+    # logmat(map_hlt, 'map_hlt', lvl=lvl)
+    # logmat(map_depot, 'map_depot', yx_ship, _yx_depots_mine, _yx_ships, lvl=lvl)
+    # logmat(map_cost, 'map_cost', _yx_depots_mine, _yx_ships, lvl=lvl)
+    logmat(map_val, 'map_val', yx_ship, _yx_depots_mine, _yx_ships, lvl=lvl)
+    logmat(map_back, 'map_back: %s'%ship, yx_ship, _yx_depots_mine, _yx_ships, lvl=lvl)
+    # @logaz('za', lvl=lvl)
+    def eval_dir(_dir):
+      pos_dst = p8d2pos(ship.position, _dir)
+      yx_dst = obj2yx(pos_dst, DIM_GAME)
+      cargo_space = const.MAX_HALITE-ship.halite_amount
+      val_roam = min(cargo_space, int(map_back[yx_dst]))
+      val_pick = min(cargo_space, math.ceil(map_hlt[yx_dst]*rate_pick(ship))) if _dir == DIR_O else 0
+      # _rate_decay = r_depot_decay()**dist_mtn(pos_dst, depot_nearest(ship))
+      # val_drop = math.floor(ship.halite_amount * _rate_decay)
+      val_drop = ship.halite_amount 
+      val_all = val_roam + val_pick + val_drop
+      # logf('%s->%s: %03s, %03s, %03s => %s', ship, _dir, val_roam, val_pick, val_drop, val_all)
+      return val_all
+    def eval_vimp(vimp): # cargocap tiebreak 1) dist2depot 2) cost2depot
+      val,ship,move,pos_dst = vimp
+      yx = obj2yx(pos_dst, DIM_GAME)
+      dist2depot = dist_mtn(pos_dst, depot_nearest(ship))
+      # logf((ship, depot_nearest(ship), dist2depot))
+      cost2depot = map_depot[yx]
+      return val, -dist2depot, -cost2depot, ship, move, pos_dst
+    return eval_dir, eval_vimp
+  def s8d2vimp(eval_dir, ship, _dir, dirs_drop={}): # Ship,Dir -> val,ship,Move,Pos
+    val = eval_dir(_dir)
+    if _dir in dirs_drop: val+=ship.halite_amount
+    move = ship.move(_dir)
+    pos_dst = p8d2pos(ship.position, _dir)
+    return (val, ship, move, pos_dst)
+  # @timit
+  def get_vimps(ship): # Ship -> [(val, ship, Move, Pos)]
+    ## TASK
+    task = get_ship2task(ship)
     if task == Task.term: # sink state
-      pass
-    elif not task or ship.halite_amount == 0:
+      pass # TODO?
+    elif not task or ship.halite_amount==0: # newborn or after Drop
       task = Task.roam
-    elif task == Task.roam and ship.halite_amount >= n_drop():
+    elif task == Task.roam and ship.halite_amount >= n_drop(): # TODO?
       task = Task.drop
-    elif task_terminal(ship, depot_nearest_ship):
+    elif task_terminal(ship):
       task = Task.term
-    set_sid2task(sid, task)
-    # gen vimps: seed w/ Stay unless on Shipyard -> don't Stay & block
-    pos_depots = map(obj2pos, depots_by_dist(ship))
-    vimps = [] if ship.position in pos_depots else [s8d2vimp(ship, O)]
-    # TMP depot
-    # if eval_depot(ship) > 0 and me.halite_amount>=const.DROPOFF_COST:
-    if eval_depot(ship, depot_nearest_ship) > 0:
+    set_ship2task(ship, task)
+    ## MOVE: seed w/ Stay unless on Depots -> don't Stay & block!
+    eval_dir, eval_vimp = scan_maps(map_hlt, ship)
+    vimps = [] if same_pos(ship, depot_nearest(ship)) else [s8d2vimp(eval_dir, ship, DIR_O)]
+    # Move-oriented depot TODO Goal-orient
+    val_depot = eval_depot(ship, depot_nearest(ship))
+    # debug
+    if val_depot > get_vdb():
+      set_vdb(val_depot)
+      log.warning('better val_depot_best! %s => %s', ship, val_depot)
+    if val_depot > 0:
       if me.halite_amount>=const.DROPOFF_COST:
-        vimps.append( (eval_depot(ship, depot_nearest_ship), ship.id, ship.make_dropoff(), ship.position) )
-      else:
-        toggle_depot(ship.id) # NOT updating saving4depot!!!
-    if wont_stall(ship): # enough fuel to move
+        vimps.append( (val_depot, ship, ship.make_dropoff(), ship.position) )
+      else: toggle_depot(ship)
+    if not will_stall(ship): # enough fuel to move
       if task in (Task.drop, Task.term):
-        # _dir_drop = game_map.naive_navigate(ship, me.shipyard.position)
-        Dirs_drop = game_map.get_unsafe_moves(ship.position, depot_nearest_ship.position)
+        # dirs_drop = gm.naive_navigate(ship, depot_nearest(ship).position)
+        dirs_drop = gm.get_unsafe_moves(ship.position, depot_nearest(ship).position)
       else:
-        Dirs_drop = []
-      for Dir in Dirs4:  # O already seeded
-        # log.debug('%s vs %s: %s', Dir, Dirs_drop, Dir==Dirs_drop)
-        vimps.append(s8d2vimp(ship, Dir, drop=Dir in Dirs_drop))
-    # HACK: only-Move must happen -> bump-up
+        dirs_drop = []
+      for _dir in DIRS4:
+        vimps.append( s8d2vimp(eval_dir, ship, _dir, dirs_drop=dirs_drop) )
+    # HACK: bump-up only-Move otherwise Ship might be forced to Stay & get hit!
     if len(vimps) == 1:
-      v,i,m,p = vimps[0]
-      vimps[0] = (v+const.SHIP_COST, i, m, p)
-    logitr(sorted(vimps, reverse=True), 'vimps <- ship')
-    return vimps
+      [(v,i,m,p)] = vimps
+      vimps = [(v+const.SHIP_COST, i, m, p)]
+    # HACK break val-tie w/ 1) min dist2depot 2) min cost2depot
+    vdcimps = mapl(eval_vimp, vimps) 
+    return vdcimps
+  # @timit
+  def get_vimps_all():  return sorted(flatmap(get_vimps, ships_mine()), reverse=True)
+  def get_spawn(moves): # TODO smart eval
+    if all([
+      spawn_cap(),
+      # HACK save4depot up to cost for 1
+      ((not sv4depot() and me.halite_amount >= const.SHIP_COST)
+        or (me.halite_amount >=const.DROPOFF_COST+const.SHIP_COST)),
+      pos_free(me.shipyard),
+      # TODO comp(sum.val_future$ship, cost_ship) > 0
+      which_turn() <= turn_last_spawn(),
+      ]):
+      moves.append( me.shipyard.spawn() )
+    return moves
+  vdcimps = get_vimps_all()
+  # @logaz('za', lvl=lvl)
+  def can_vacate(pos): # if ship_mine @pos can move out - don't take spot otherwise
+    ship_mine = pos2ship_mine().get(pos)
+    if not ship_mine:  return True
+    elif will_stall(ship_mine):  return False
+    else: return any(map(pos_free, [p for (d,p) in gen_ring(pos, 1)]))
+  # TODO greedy -> knapsack w/ dynamic re-eval
+  # TODO pos_free -> 1) intertemporal 2) val-based
+  # TODO use priority-queue + auto-promote last-move
+  def alloc_moves(vdcimps, show=True):
+    ship2n_moves = Counter(ship for v,d,c,ship,m,p in vdcimps)
+    # logitr(ship2n_moves, 'ship2n_moves', lvl=lvl)
+    for i, (val, dist2depot, cost2depot, ship, move, pos_dst) in enumerate(vdcimps): # TODO improve curr GreedyAlgo
+      # dont take pos_dst ship_mine's final-move
+      ship_on_pos_dst = pos2ship_mine().get(pos_dst)
+      if ship_on_pos_dst and ship!=ship_on_pos_dst and ship2n_moves[ship_on_pos_dst]==1:
+        log.warning('skip: [%s] %s > %s << %s', val, ship, pos_dst, ship_on_pos_dst)
+        continue
+      str_move = str((val, dist2depot, cost2depot, ship, get_ship2task(ship), move, pos_dst))
+      if (ship_free(ship)
+        and (pos_free(pos_dst) or move_terminal(ship, pos_dst))):
+        # HACK: build <= 1 Depot/turn
+        if move.split()[0]==cmds.CONSTRUCT:
+          if sv4depot() or gm[pos_dst].has_structure:  continue # next
+          else:
+            log.warning('Making depot @%s', pos_dst)
+            toggle_depot(ship)
+        # move approved
+        save_vimp(val, ship, move, pos_dst) # -> clj_move
+        ship2n_moves[ship] -= 1
+        # logitr(ship2n_moves, 'ship2n_moves', lvl=lvl)
+        str_move = '> %s'%str_move
+      if show:  logf(str_move)
+  alloc_moves(vdcimps)
+  mvs8spwn = get_spawn(export_moves())
+  logitr(mvs8spwn, lvl=lvl)
+  return mvs8spwn
 
-  vimps = sorted(flatmap(get_vimps, ships_mine()), reverse=True)
-  logitr(vimps, 'vimps <- turn')
-  already_building_depot = False # TMP prevents multiple depot same turn
-  logitr(vimps)
-  for val, sid, move, pos_dst in vimps: # TODO improve curr GreedyAlgo
-    if (sid_free(sid)
-      and (pos_free(pos_dst) or move_terminal(sid, pos_dst))):
-      # HACK
-      if move.split()[0]=='c':
-        if already_building_depot:  continue
-        else:
-          already_building_depot = True
-          toggle_depot(sid)
-      save(val, sid, move, pos_dst)
-  show_ship_asmts()
-  return export_moves(), pos_free, if_depoting
-
-def get_spawn(moves, pos_free, if_depoting):
-  if all([
-    game.turn_number <= .5 * MAX_TURN,
-    me.halite_amount >= const.SHIP_COST,
-    pos_free(me.shipyard),
-    not if_depoting(),
-    # TODO comp(sum.val_future$ship, cost_ship) > 0
-    ]):
-    moves.append( me.shipyard.spawn() )
-  return moves
 """ <<<Game Loop>>> """
-@timit('warn')
+@timit
 def game_loop(lvl='info'):
-  game.update_frame()
-  log.info('Age: %.3f; r_fresh: %.3f; n_drop: %d', age(), r_curio(), n_drop())
-  log.debug(game_map)
-  # Memo refresh
-  pos2val, show_value_matrix, eval_depot = clj_eval(lvl=lvl)
-  # show_value_matrix()
-  if_inspired = clj_inspire()
-  rate_pick = clj_param_pick(if_inspired)
+  t0 = time.time() # conservative?
+  map_hlt = game.update_frame()
+  log.info('Age: %.3f; r_fresh: %.3f; n_drop: %d', age(), r_decay(), n_drop())
   # Move & Spawn
-  moves, pos_free, if_depoting = get_moves(pos2val, rate_pick, if_inspired, eval_depot)
-  moves_and_spawn = get_spawn(moves, pos_free, if_depoting)
-  # logitr(moves_and_spawn, lvl=lvl)
+  comms = get_comms(t0, map_hlt, lvl=lvl)
   # Submit & next
-  # show_EOT_stats()
-  game.end_turn(moves_and_spawn)
+  game.end_turn(comms)
 while True: game_loop()
