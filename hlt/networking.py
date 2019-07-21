@@ -1,16 +1,20 @@
-import json, logging, sys
+import json
+import logging
+import sys
 
-from . import constants
 from .common import read_input
+from . import constants
 from .game_map import GameMap, Player
 
-from .param import TURNS_FOCO
 from .util import timit
 
 LOG_LVL = logging.DEBUG
 LOG_LVL = logging.INFO
 # LOG_LVL = logging.WARNING
 LVL_INCR = 10 # raise log-threshold on regular-turns
+T0, TD = 0, 0
+# T0, TD = 80, 1
+TURNS_FOCO = range(T0, T0+TD+1)
 
 
 class Game:
@@ -34,7 +38,7 @@ class Game:
       filename="bot-{}.log".format(self.my_id),
       filemode="w",
       level=LOG_LVL,
-      format='%(module)s.%(funcName)s:%(lineno)d: %(message)s')
+      format='<%(module)s.%(funcName)s:%(lineno)d> %(message)s')
 
     self.players = {}  # sid -> Player
     for player in range(num_players):
@@ -50,9 +54,7 @@ class Game:
     send_commands([name])
     logging.info("Successfully created bot! My Player ID is {}.".format(self.my_id))
 
-  # @timit('warn')
-  def _stat_turn(self, map_hlt):
-    hlt_left = round(map_hlt.sum(), -3) # nearest 1e3
+  def _stat_turn(self):
     worth_store = self.me.halite_amount
     ships_mine = self.me.get_ships()
     n_depots = len(self.me.get_dropoffs())
@@ -62,27 +64,27 @@ class Game:
     worth_cargo = sum(s.halite_amount for s in ships_mine)
     worth_total = worth_store + worth_depots + worth_ships + worth_cargo
 
-    logging.critical(" T{turn:03}: {store} + {depot}d + {ship}s + {cargo} ~> {total} / {hlt_left}k".format(
+    logging.critical("<<< T{turn:03}: {store} + {depot}d + {ship}s + {cargo} ~> {total} >>>".format(
       turn=self.turn_number,
       store=worth_store,
       depot=n_depots,
       ship=n_ships,
       cargo=worth_cargo,
       total=worth_total,
-      hlt_left=int(hlt_left/1e3)
       ))
 
   def _update_log_lvl(self):
     log_lvl = LOG_LVL if self.turn_number in TURNS_FOCO else LOG_LVL+LVL_INCR
     logging.getLogger().setLevel(log_lvl)
 
-  # @timit('warn')
+  # @timit(lvl='warn')
   def update_frame(self):
     """
     Updates the game object's state.
     :returns: nothing.
     """
     self.turn_number = int(read_input())
+
     # to speedup testing
     turn_terminal = TURNS_FOCO[-1]
     if turn_terminal>0 and self.turn_number==turn_terminal: sys.exit(0)
@@ -90,7 +92,6 @@ class Game:
 
     for _ in range(len(self.players)):
       player, num_ships, num_dropoffs, halite = map(int, read_input().split())
-    # TODO memo to avoid regen objs -> enable cross-turn memo & speedup
       self.players[player]._update(num_ships, num_dropoffs, halite)
 
     self.game_map._update()
@@ -104,9 +105,7 @@ class Game:
       for dropoff in player.get_dropoffs():
         self.game_map[dropoff.position].structure = dropoff
 
-    map_hlt = self.game_map.map_hlt()
-    self._stat_turn(map_hlt)
-    return map_hlt
+    self._stat_turn()
 
   @staticmethod
   def end_turn(commands):

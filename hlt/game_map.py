@@ -1,13 +1,11 @@
 # import queue
 
-import numpy as np
 import pandas as pd
 
 from . import constants
 from .entity import Entity, Shipyard, Ship, Dropoff
 from .positionals import Direction, Position
 from .common import read_input
-from .util import timit
 
 
 class Player:
@@ -149,12 +147,6 @@ class GameMap:
     self.width = width
     self.height = height
     self._cells = cells # [[MapCell]] : [y][x]
-  # USR: -> halite-matrix [y,x]
-  # @timit('warn')
-  def map_hlt(self):
-    hlt_yx = [[cell.halite_amount for cell in row] 
-      for row in self._cells]
-    return np.asarray(hlt_yx)
   # Pos | Ent -> MapCell
   def __getitem__(self, location):
     """
@@ -216,7 +208,7 @@ class GameMap:
     """
     return (Direction.South if target.y > source.y else Direction.North if target.y < source.y else None,
         Direction.East if target.x > source.x else Direction.West if target.x < source.x else None)
-  # ignore collision
+
   def get_unsafe_moves(self, source, destination): # Pos, Pos -> [Dir]
     """
     Return the Direction(s) to move closer to the target point, or empty if the points are the same.
@@ -239,8 +231,8 @@ class GameMap:
       possible_moves.append(y_cardinality if distance.y < (self.height / 2)
                   else Direction.invert(y_cardinality))
     return possible_moves
-  # avoid collision
-  def naive_navigate(self, ship, destination): # Ship,Pos->[Dir]
+
+  def naive_navigate(self, ship, destination):
     """
     Returns a singular safe move towards the destination.
 
@@ -255,6 +247,7 @@ class GameMap:
       if not self[target_pos].is_occupied:
         self[target_pos].mark_unsafe(ship)
         return direction
+
     return Direction.Still
 
   ## SYS

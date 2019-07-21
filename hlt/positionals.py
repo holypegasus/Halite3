@@ -59,10 +59,11 @@ class Direction(Delta):
   """
   Holds positional tuples in relation to cardinal directions
   """
-  East = (1, 0)
   North = (0, -1)
-  West = (-1, 0)
   South = (0, 1)
+  East = (1, 0)
+  West = (-1, 0)
+
   Still = (0, 0)
 
   @staticmethod
@@ -71,12 +72,7 @@ class Direction(Delta):
     Returns all contained items in each cardinal
     :return: An array of cardinals
     """
-    return [
-      Direction.East, 
-      Direction.North, 
-      Direction.West,
-      Direction.South, 
-      ]
+    return [Direction.North, Direction.South, Direction.East, Direction.West]
 
   @staticmethod
   def convert(direction):
@@ -164,10 +160,6 @@ class Position:
   def __abs__(self):
     return Position(abs(self.x), abs(self.y))
 
-  def __lt__(self, other):
-    assert isinstance(other, Position)
-    return self.x<other.x or (self.x==other.x and self.y<other.y)
-
   def __eq__(self, other):
     assert isinstance(other, Position)
     return self.x == other.x and self.y == other.y
@@ -177,7 +169,7 @@ class Position:
     return not self.__eq__(other)
 
   def __repr__(self):
-    return "{}({},{})".format(
+    return "{}({}, {})".format(
       # self.__class__.__name__,
       self.alias, self.x, self.y)
 
